@@ -1,0 +1,6 @@
+date,username,product,sku,model,quantity,unit_type,applied_cost_per_quantity,gross_amount,discount_amount,net_amount,organization,cost_center_name,aic_quantity,aic_gross_amount
+6/1/26,jdoe,copilot,copilot_ai_credit,Auto: Claude Sonnet 4.6,420.5,ai-credits,0.01,4.205,4.205,0,example-org,Powertrain,420.5,4.205
+6/1/26,jdoe,copilot,coding_agent_ai_credit,claude-sonnet-4.6,1300.0,ai-credits,0.01,13.0,13.0,0,example-org,Powertrain,1300.0,13.0
+6/2/26,asmith,copilot,copilot_ai_credit,gpt-5.4,210.0,ai-credits,0.01,2.1,2.1,0,example-org,Infotainment,210.0,2.1
+6/2/26,asmith,copilot,copilot_ai_credit,gpt-5-mini,55.0,ai-credits,0.01,0.55,0.55,0,example-org,Infotainment,55.0,0.55
+6/3/26,bwong,copilot,copilot_ai_credit,claude-opus-4.8,900.0,ai-credits,0.01,9.0,9.0,0,example-org,ADAS,900.0,9.0
