@@ -192,7 +192,7 @@ Expected output — all six lines must say `OK` or `PASS`:
 [1] GPT-5 mini 20k/10k/3k -> 1.125 credits (expected 1.125)
 [2] inversion with true mix -> 33,000 tokens (actual 33,000; err 0.00%)
 [3] auto-select token uplift -> x1.1111 (expected x1.1111)
-[4] band low<=exp<=high -> 150,262 <= 224,921 <= 417,853  OK
+[4] band low<=exp<=high -> 154,440 <= 236,406 <= 465,608  OK
 [5] bucket day/week/month -> 2026-06-03 / 2026-W23 / 2026-06  OK
 [6] pivot conservation -> grand total 175 (expected 175)  OK
 
@@ -243,6 +243,9 @@ to each user's AI credits.
 > **Advanced options:**
 > - `--out <path>` — write the detailed CSV to a specific path instead of `--reports-dir/<stem>.csv` (use when you want the CSV only, without pivot/summary artifacts, or to pipe to stdout by default)
 > - `--summary-out <path>` — write the executive summary markdown to a specific path instead of `--reports-dir/<stem>-executive-summary.md`
+> - `--cache-fraction <C>` — pin the cache-read fraction of input tokens (0–1) for all rows, to reconcile the estimate against a measured token-throughput report (see [Billable (cost-weighted) tokens vs. raw throughput](#billable-cost-weighted-tokens-vs-raw-throughput))
+> - `--output-ratio <RHO>` — pin the output:input token ratio for all rows (calibration knob; pairs with `--cache-fraction`)
+> - `--cache-write-fraction <W>` — pin the cache-write fraction (0–1); needed only for ultra-cache-heavy tenants where `--cache-fraction` exceeds the prior cache-write floor
 
 ---
 
@@ -314,13 +317,47 @@ plausible range derived from feature priors:
 
 | Feature / SKU | ρ (out:in) low–exp–high | c (cache frac) low–exp–high |
 |---|---|---|
-| `coding_agent_ai_credit` (agent/edit) | 0.04 – 0.12 – 0.30 | 0.40 – 0.65 – 0.85 |
-| `copilot_ai_credit` (chat, review) | 0.10 – 0.25 – 0.50 | 0.20 – 0.45 – 0.70 |
-| `default` (unknown SKU) | 0.05 – 0.20 – 0.45 | 0.30 – 0.55 – 0.80 |
+| `coding_agent_ai_credit` (agent/edit) | 0.04 – 0.12 – 0.30 | 0.55 – 0.85 – 0.97 |
+| `copilot_ai_credit` (chat, review) | 0.10 – 0.25 – 0.50 | 0.30 – 0.55 – 0.80 |
+| `default` (unknown SKU) | 0.05 – 0.20 – 0.45 | 0.40 – 0.70 – 0.90 |
 
 - **`cost_usd` is exact** — credits × $0.01, no estimation involved
 - **Token estimates** are accurate at the monthly aggregate level (single-digit % error);
   individual row error is wider but cancels across users and models at the reporting grain
+
+### Billable (cost-weighted) tokens vs. raw throughput
+
+`est_total_tokens` is a **cost-weighted (billable)** figure — it is inverted from
+dollars, where GitHub bills cache-read tokens at ~10% of the uncached-input rate.
+A raw **token-throughput** report (such as the GitHub Copilot metrics export) counts
+every token at 100%, including:
+
+- **Cache reads**, which agentic sessions re-send and re-read on *every* tool-call
+  iteration. For heavy agentic work these are 85–98% of all input tokens, so the
+  throughput view can run **2–5× higher** than this dollar-inverted view.
+- **IDE code completions / next edit suggestions**, which are **not billed in AI
+  credits at all** — they carry zero credits, so they can never be recovered by
+  inverting credits. A throughput report may still count them.
+
+Both numbers are correct; they answer different questions ("what did we pay for?"
+vs. "how many tokens flowed?"). The dollars tie to the penny either way — only the
+token split differs. To make this tool **reproduce** a measured throughput figure,
+pin the mix to your observed values:
+
+```bash
+python tools/aic_token_estimator/aic_tokens.py estimate \
+  --csv copilot_usage_reports/2026-may/ai-usage-report.csv \
+  --cache-fraction 0.92 \
+  --output-ratio 0.06 \
+  --cache-write-fraction 0.02
+```
+
+- `--cache-fraction` — measured cache-read fraction of input tokens (the dominant
+  lever; a higher value yields more face-value tokens for the same credits)
+- `--output-ratio` — measured output:input ratio (optional)
+- `--cache-write-fraction` — only needed when `--cache-fraction` exceeds ~0.95
+
+Dollars are unaffected by any of these — only the token split moves.
 
 ### Executive summary structure (`<stem>-executive-summary.md`)
 
