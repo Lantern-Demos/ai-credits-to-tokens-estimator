@@ -5,6 +5,11 @@ All rates are USD per 1,000,000 tokens, taken from the official GitHub Copilot
 "Models and pricing" reference (verified 2026-06-19):
 https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing
 
+Per-model AI-Credit rates were additionally cross-verified 2026-06-25 against the
+`copilotPricing` blocks in rajbos/ai-engineering-fluency (modelPricing.json),
+which sources the same GitHub Models-and-pricing page. That pass corrected the
+grok-code-fast-1, gpt-5.2, gpt-4.1, and gpt-4o entries (see inline notes).
+
 Pricing columns:
   in     = input (uncached) tokens
   cache  = cached-input (cache-read) tokens
@@ -59,16 +64,18 @@ _MODELS: list[ModelPricing] = [
                  aliases=("gpt-5.4 nano", "gpt-5 nano", "gpt-5.4-nano")),
     ModelPricing("gpt-5.5", "openai", 5.00, 0.50, 30.00,
                  long=LongTier(272_000, 10.00, 1.00, 45.00)),
-    # GPT-5.2 not in current GitHub Copilot pricing docs (legacy/deprecated);
-    # proxy: GPT-5.4-mini rate (mid-tier model, similar generation).
-    ModelPricing("gpt-5.2", "openai", 0.75, 0.075, 4.50),
-    # GPT-4.1 not in current GitHub Copilot pricing docs (legacy/deprecated);
-    # proxy: OpenAI public API rate as of April 2026.
-    ModelPricing("gpt-4.1", "openai", 2.00, 0.20, 8.00),
-    # GPT-4o not in current GitHub Copilot pricing docs (legacy/deprecated);
-    # legacy multiplier = 0.33x (lightweight tier, same as Haiku/Gemini Flash).
-    # proxy: OpenAI public API rate as of April 2026.
-    ModelPricing("gpt-4o", "openai", 2.50, 0.25, 10.00),
+    # GPT-5.2 (releaseStatus "Closing down 2026-06-01"). Exact GitHub AI-Credit
+    # rates, cross-verified 2026-06-25 against rajbos/ai-engineering-fluency
+    # modelPricing.json (GitHub Models-and-pricing copilotPricing block).
+    ModelPricing("gpt-5.2", "openai", 1.75, 0.175, 14.00),
+    # GPT-4.1 (releaseStatus "Closing down 2026-06-01"). Cache read is 25% of
+    # input (0.50), not the usual 10% — verified against GitHub copilotPricing
+    # via rajbos/ai-engineering-fluency modelPricing.json (2026-06-25).
+    ModelPricing("gpt-4.1", "openai", 2.00, 0.50, 8.00),
+    # GPT-4o is not in GitHub's current AI-Credit pricing (no copilotPricing
+    # block). Retained as a fallback proxy at OpenAI's published rate, where
+    # cache read is 50% of input (1.25). Verified 2026-06-25.
+    ModelPricing("gpt-4o", "openai", 2.50, 1.25, 10.00),
     # ── Anthropic (note: cwrite is charged) ────────────────────────────────
     ModelPricing("claude-haiku-4.5", "anthropic", 1.00, 0.10, 5.00, cwrite=1.25,
                  aliases=("claude haiku 4.5", "haiku 4.5")),
@@ -94,9 +101,11 @@ _MODELS: list[ModelPricing] = [
     ModelPricing("raptor-mini", "github", 0.25, 0.025, 2.00),
     ModelPricing("mai-code-1-flash", "microsoft", 0.75, 0.075, 4.50),
     # ── xAI ─────────────────────────────────────────────────────────────────
-    # Grok Code Fast 1 not in current GitHub Copilot pricing docs;
-    # proxy: GPT-5.4 rate (mid-tier model).
-    ModelPricing("grok-code-fast-1", "xai", 2.50, 0.25, 15.00,
+    # Grok Code Fast 1 (GA, "Lightweight"). Exact GitHub AI-Credit rates,
+    # cross-verified 2026-06-25 against rajbos/ai-engineering-fluency
+    # modelPricing.json copilotPricing block. (Previously a GPT-5.4 proxy that
+    # over-stated the rate ~10x and under-counted Grok tokens by the same factor.)
+    ModelPricing("grok-code-fast-1", "xai", 0.20, 0.02, 1.50,
                  aliases=("grok code fast 1",)),
     # ── Special models (auto-selected, underlying model not disclosed) ────────
     # Code Review: GitHub docs state "model is selected automatically and not

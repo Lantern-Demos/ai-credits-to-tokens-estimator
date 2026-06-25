@@ -133,7 +133,7 @@ Expected output — all six lines must say `OK` or `PASS`:
 [1] GPT-5 mini 20k/10k/3k -> 1.125 credits (expected 1.125)
 [2] inversion with true mix -> 33,000 tokens (actual 33,000; err 0.00%)
 [3] auto-select token uplift -> x1.1111 (expected x1.1111)
-[4] band low<=exp<=high -> 150,262 <= 224,921 <= 417,853  OK
+[4] band low<=exp<=high -> 154,440 <= 236,406 <= 465,608  OK
 [5] bucket day/week/month -> 2026-06-03 / 2026-W23 / 2026-06  OK
 [6] pivot conservation -> grand total 175 (expected 175)  OK
 
@@ -175,6 +175,9 @@ python tools/aic_token_estimator/aic_tokens.py estimate [options]
 | `--report-stem <name>` | No (default: derived from CSV filename) | Base filename for report artifacts |
 | `--out <path>` | No | Write the detailed CSV to a specific path |
 | `--summary-out <path>` | No | Write the executive summary to a specific path |
+| `--cache-fraction <C>` | No | Pin the cache-read fraction of input tokens (0–1) for all rows to reconcile the estimate against a measured token-throughput report. Higher `C` → more tokens per credit |
+| `--output-ratio <RHO>` | No | Pin the output:input token ratio for all rows (calibration knob; pairs with `--cache-fraction`) |
+| `--cache-write-fraction <W>` | No | Pin the cache-write fraction (0–1); needed only for ultra-cache-heavy tenants where `--cache-fraction` exceeds the prior cache-write floor |
 
 **`--period` values:**
 
@@ -285,9 +288,9 @@ copilot_usage_reports/<period>/      tools/aic_token_estimator/
 
 | SKU | ρ (out:in) low–exp–high | Cache frac low–exp–high |
 |---|---|---|
-| `coding_agent_ai_credit` (agent/edit) | 0.04 – 0.12 – 0.30 | 0.40 – 0.65 – 0.85 |
-| `copilot_ai_credit` (chat, review) | 0.10 – 0.25 – 0.50 | 0.20 – 0.45 – 0.70 |
-| `default` (unknown SKU) | 0.05 – 0.20 – 0.45 | 0.30 – 0.55 – 0.80 |
+| `coding_agent_ai_credit` (agent/edit) | 0.04 – 0.12 – 0.30 | 0.55 – 0.85 – 0.97 |
+| `copilot_ai_credit` (chat, review) | 0.10 – 0.25 – 0.50 | 0.30 – 0.55 – 0.80 |
+| `default` (unknown SKU) | 0.05 – 0.20 – 0.45 | 0.40 – 0.70 – 0.90 |
 
 ---
 
@@ -346,6 +349,9 @@ This repo uses instruction files in `.github/instructions/` that Copilot and con
 
 **Q: Why is `cost_usd` exact but token counts are estimates?**
 GitHub reports credits (which map exactly to dollars at `$0.01` each), but never exposes the token breakdown. The tool inverts the dollar amount back to tokens using published per-model rates and calibrated mix assumptions.
+
+**Q: Why are these token numbers lower than GitHub's "token usage by user" report?**
+They measure two different things, and both are valid. This tool inverts **dollars** back into tokens, so it reports **cost-weighted (billable) tokens**: GitHub bills cache-read tokens at ~10% of the uncached-input rate, so cache reads barely move the dollar total and therefore barely register in a dollar-anchored inversion. GitHub's metrics report counts **raw throughput** — every token at 100%, including cache reads (which agentic sessions re-read on every iteration) and possibly IDE code completions (which carry *no* AI credits at all and so can never be recovered from credits). For cache-heavy agentic usage the throughput view can run several times higher. To make this tool reproduce a throughput figure, re-run with `--cache-fraction <c>` (and, for very cache-heavy tenants, `--output-ratio` and `--cache-write-fraction`) pinned to your measured values — the dollars stay identical to the penny; only the token split moves.
 
 **Q: Do code completions appear in the report?**
 No. IDE code completions are billed separately and do not appear as AI Credits. This tool only covers interactions that consume AI Credits (chat, agent, code review, etc.).

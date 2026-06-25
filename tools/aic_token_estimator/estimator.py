@@ -33,6 +33,19 @@ Because I is proportional to 1/R, the token estimate is largest when R is
 smallest (low rho, high cache) and smallest when R is largest (high rho, low
 cache). We exploit this to produce analytic low/high bounds without sampling.
 
+What the token total represents
+-------------------------------
+The estimate is inverted from DOLLARS, so it is a *cost-weighted* (billable)
+token figure. GitHub bills cache-read tokens at a discounted rate relative to
+uncached input (often ~0.1×, but model-dependent), yet a raw token-throughput
+report (e.g. the GitHub Copilot metrics export) counts those cached tokens at
+100%. For cache-heavy agentic usage the throughput view can read several times
+higher than this dollar-inverted view — both are valid, they just measure
+different things. The cache fraction `c` is the lever
+that moves between them; supply a measured `c` (see calibrate_mix) to make the
+estimate reproduce a throughput figure. IDE code completions are not billed in
+AI credits, so they carry no credits to invert and are out of scope here.
+
 Source for constants and the forward formula:
   https://docs.github.com/en/copilot/concepts/billing/usage-based-billing-for-organizations-and-enterprises
   https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing
@@ -60,19 +73,30 @@ class Mix:
     w_ex: float = 0.0  # cache-write fraction (Anthropic); same across band
 
 
-# Empirical feature priors. rho = output:input ratio; c = cache-read fraction.
-# Ranges are intentionally wide so the confidence band brackets reality until
-# OTel calibration narrows them. Keyed by normalized SKU/feature.
+# Empirical feature priors. rho = output:input ratio; c = cache-read fraction
+# of total input tokens; w = cache-write fraction.
+#
+# Why the cache fractions are high (and why this is the dominant lever on the
+# token TOTAL): GitHub bills cache-read tokens at ~0.1x the uncached-input rate,
+# but a raw token-throughput report still counts every cached token at 100%.
+# Agentic sessions re-send the whole working context on each tool-call iteration,
+# so cache reads dominate input volume — commonly 0.85-0.97 of all input tokens.
+# Because this estimator inverts DOLLARS (where cache reads are nearly free) back
+# into face-value tokens, an under-stated cache fraction under-counts throughput
+# by multiples. These priors are set so the expected point and the high band
+# bracket realistic agentic throughput; pass a measured value via calibrate_mix()
+# / the `--cache-fraction` CLI flag to collapse the band and reconcile exactly.
+# Ranges stay wide until per-tenant telemetry narrows them.
 MIX_PRIORS: dict[str, Mix] = {
-    # Agentic coding (IDE agent/edit mode, coding agent): huge cached context,
-    # modest generated output.
-    "coding_agent_ai_credit": Mix(0.04, 0.12, 0.30, 0.40, 0.65, 0.85, w_ex=0.05),
-    "agent":                  Mix(0.04, 0.12, 0.30, 0.40, 0.65, 0.85, w_ex=0.05),
+    # Agentic coding (IDE agent/edit mode, coding agent): huge cached context
+    # re-read every iteration, modest generated output.
+    "coding_agent_ai_credit": Mix(0.04, 0.12, 0.30, 0.55, 0.85, 0.97, w_ex=0.05),
+    "agent":                  Mix(0.04, 0.12, 0.30, 0.55, 0.85, 0.97, w_ex=0.05),
     # Chat / ask / code review / spaces: smaller context, longer explanations.
-    "copilot_ai_credit":      Mix(0.10, 0.25, 0.50, 0.20, 0.45, 0.70, w_ex=0.03),
-    "spark_ai_credit":        Mix(0.10, 0.25, 0.50, 0.20, 0.45, 0.70, w_ex=0.03),
+    "copilot_ai_credit":      Mix(0.10, 0.25, 0.50, 0.30, 0.55, 0.80, w_ex=0.03),
+    "spark_ai_credit":        Mix(0.10, 0.25, 0.50, 0.30, 0.55, 0.80, w_ex=0.03),
     # Generic fallback when SKU/feature is unknown.
-    "default":                Mix(0.05, 0.20, 0.45, 0.30, 0.55, 0.80, w_ex=0.03),
+    "default":                Mix(0.05, 0.20, 0.45, 0.40, 0.70, 0.90, w_ex=0.03),
 }
 
 
@@ -80,6 +104,33 @@ def get_mix(sku: str | None) -> Mix:
     if sku and sku in MIX_PRIORS:
         return MIX_PRIORS[sku]
     return MIX_PRIORS["default"]
+
+
+def calibrate_mix(sku: str | None, *, cache_fraction: float | None = None,
+                  output_ratio: float | None = None,
+                  cache_write_fraction: float | None = None) -> Mix:
+    """Return the SKU prior with measured dimensions pinned to known values.
+
+    Supplying `cache_fraction` (c), `output_ratio` (rho), and/or
+    `cache_write_fraction` (w) collapses that dimension's low/expected/high to the
+    measured value while keeping the prior range for whatever is still unknown.
+    Use this to reconcile the estimate with an observed token-throughput figure
+    (e.g. the GitHub Copilot metrics report): a higher cache fraction yields more
+    face-value tokens for the same credits. Pin `w` as well for ultra-cache-heavy
+    tenants where c exceeds the prior's default cache-write floor (otherwise
+    `_invert` caps c at 1 - w and recovery is incomplete).
+    """
+    base = get_mix(sku)
+    rho_lo, rho_ex, rho_hi = base.rho_lo, base.rho_ex, base.rho_hi
+    c_lo, c_ex, c_hi = base.c_lo, base.c_ex, base.c_hi
+    w = base.w_ex
+    if output_ratio is not None:
+        rho_lo = rho_ex = rho_hi = output_ratio
+    if cache_fraction is not None:
+        c_lo = c_ex = c_hi = cache_fraction
+    if cache_write_fraction is not None:
+        w = cache_write_fraction
+    return Mix(rho_lo, rho_ex, rho_hi, c_lo, c_ex, c_hi, w_ex=w)
 
 
 def _rates(p: ModelPricing, long_context: bool) -> tuple[float, float, float, float]:

@@ -38,7 +38,7 @@ if str(_repo_root) not in sys.path:
     sys.path.insert(0, str(_repo_root))
 
 from tools.aic_token_estimator.catalog import USD_PER_CREDIT, get_pricing
-from tools.aic_token_estimator.estimator import estimate_tokens
+from tools.aic_token_estimator.estimator import calibrate_mix, estimate_tokens
 
 
 # ── CSV column resolution ────────────────────────────────────────────────────
@@ -371,7 +371,7 @@ def _build_executive_summary_markdown(
     lines.append(f"- **Unique users:** {len(user_rollup)}")
     lines.append(f"- **Total AI Credits consumed:** {grand['credits']:.1f}")
     lines.append(f"- **Total spend (USD):** ${total_cost:,.2f}")
-    lines.append(f"- **Estimated total tokens:** {int(grand['total']):,}")
+    lines.append(f"- **Estimated total tokens (cost-weighted):** {int(grand['total']):,}")
     lines.append(
         f"- **Estimated token confidence band:** {int(grand['low']):,} to {int(grand['high']):,}"
     )
@@ -472,6 +472,22 @@ def _build_executive_summary_markdown(
         "feature priors."
     )
     lines.append(
+        "- **Token figures are cost-weighted (billable) estimates, not raw throughput.** They are "
+        "inverted from dollars, where GitHub bills cache-read tokens at a discounted rate "
+        "(often ~10% of uncached input, but model-dependent). A raw token-throughput report "
+        "(e.g. the GitHub Copilot metrics export) counts those cached tokens at 100%, so it can "
+        "read several times higher for cache-heavy agentic usage. Both views are valid — they "
+        "measure different things."
+    )
+    lines.append(
+        "- IDE **code completions and next edit suggestions are excluded**: GitHub does not bill them "
+        "in AI credits, so they carry no credits to invert (a throughput report may still count them)."
+    )
+    lines.append(
+        "- To reconcile with a measured throughput figure, re-run with `--cache-fraction <c>` (and "
+        "optionally `--output-ratio <rho>`) to pin the token mix to observed values."
+    )
+    lines.append(
         "- Confidence bands (`total_tokens_low/high`) express plausible token range for planning and "
         "cross-provider comparison."
     )
@@ -515,6 +531,29 @@ def cmd_estimate(args: argparse.Namespace) -> int:
         return 2
     period_label = {"day": "date", "week": "week", "month": "month"}[period]
 
+    # Optional calibration overrides. When supplied, the assumed cache fraction
+    # and/or output ratio are pinned to the measured value for every row, which
+    # lets the (otherwise cost-weighted) estimate reproduce a token-throughput
+    # figure. See `calibrate_mix` in estimator.py.
+    cache_override = getattr(args, "cache_fraction", None)
+    if cache_override is not None and not 0.0 <= cache_override <= 1.0:
+        print("error: --cache-fraction must be between 0 and 1", file=sys.stderr)
+        return 2
+    rho_override = getattr(args, "output_ratio", None)
+    if rho_override is not None and rho_override < 0.0:
+        print("error: --output-ratio must be >= 0", file=sys.stderr)
+        return 2
+    cwrite_override = getattr(args, "cache_write_fraction", None)
+    if cwrite_override is not None and not 0.0 <= cwrite_override <= 1.0:
+        print("error: --cache-write-fraction must be between 0 and 1", file=sys.stderr)
+        return 2
+    if (cache_override is not None and cwrite_override is not None
+            and cache_override + cwrite_override > 1.0):
+        print("error: --cache-fraction + --cache-write-fraction must be <= 1", file=sys.stderr)
+        return 2
+    calibrating = (cache_override is not None or rho_override is not None
+                   or cwrite_override is not None)
+
     # Phase 1: stream the input and aggregate raw credits by
     # (user, bucket, model_raw, sku). This reduces the number of
     # estimate_tokens() calls from O(rows) to O(unique aggregates) —
@@ -555,7 +594,11 @@ def cmd_estimate(args: argparse.Namespace) -> int:
         "output": 0.0, "total": 0.0, "low": 0.0, "high": 0.0, "unresolved": 0.0})
 
     for (user, bucket, model_raw, sku), credits in raw_agg.items():
-        est = estimate_tokens(credits, model_raw, sku or None)
+        mix = (calibrate_mix(sku or None, cache_fraction=cache_override,
+                             output_ratio=rho_override,
+                             cache_write_fraction=cwrite_override)
+               if calibrating else None)
+        est = estimate_tokens(credits, model_raw, sku or None, mix=mix)
         a = agg[(user, bucket, est.model)]
         a["credits"] += credits
         if est.resolved:
@@ -713,6 +756,23 @@ def cmd_estimate(args: argparse.Namespace) -> int:
     print(f"# cost (USD)         : {grand['credits'] * USD_PER_CREDIT:.2f}", file=sys.stderr)
     print(f"# est total tokens   : {int(grand['total']):,}", file=sys.stderr)
     print(f"#   band low / high  : {int(grand['low']):,} / {int(grand['high']):,}", file=sys.stderr)
+    if calibrating:
+        bits = []
+        if cache_override is not None:
+            bits.append(f"cache-fraction={cache_override:g}")
+        if rho_override is not None:
+            bits.append(f"output-ratio={rho_override:g}")
+        if cwrite_override is not None:
+            bits.append(f"cache-write-fraction={cwrite_override:g}")
+        print(f"#   calibration     : {', '.join(bits)} (pinned to measured values)",
+              file=sys.stderr)
+    else:
+        print("#   basis           : COST-WEIGHTED (billable) tokens, not raw "
+              "throughput.", file=sys.stderr)
+        print("#                      Cache reads bill at ~10% but a throughput "
+              "report counts them 100%;", file=sys.stderr)
+        print("#                      reconcile with --cache-fraction <c>.",
+              file=sys.stderr)
     print(f"#   input (uncached) : {int(grand['input']):,}", file=sys.stderr)
     print(f"#   cached           : {int(grand['cached']):,}", file=sys.stderr)
     print(f"#   cache-write      : {int(grand['cwrite']):,}", file=sys.stderr)
@@ -836,6 +896,22 @@ def main(argv: list[str] | None = None) -> int:
              "(default: token_estimate_reports)",
     )
     pe.add_argument("--report-stem", help="base filename for reports-dir artifacts")
+    pe.add_argument(
+        "--cache-fraction", type=float, metavar="C",
+        help="pin the assumed cache-read fraction of input tokens (0-1) for all "
+             "rows. Use this to reconcile the (cost-weighted) estimate against a "
+             "measured token-throughput report; higher C => more tokens per credit.",
+    )
+    pe.add_argument(
+        "--output-ratio", type=float, metavar="RHO",
+        help="pin the assumed output:input token ratio for all rows (calibration "
+             "knob; pairs with --cache-fraction).",
+    )
+    pe.add_argument(
+        "--cache-write-fraction", type=float, metavar="W",
+        help="pin the assumed cache-write fraction of input tokens (0-1). Applies only "
+             "to Anthropic models (prompt caching). Must satisfy cache-fraction + W <= 1.",
+    )
     pe.set_defaults(func=cmd_estimate)
 
     pf = sub.add_parser(
