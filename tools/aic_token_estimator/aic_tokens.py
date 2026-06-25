@@ -908,9 +908,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     pe.add_argument(
         "--cache-write-fraction", type=float, metavar="W",
-        help="pin the assumed cache-write fraction of input tokens (0-1). Needed "
-             "only for ultra-cache-heavy tenants where --cache-fraction exceeds the "
-             "prior cache-write floor.",
+        help="pin the assumed cache-write fraction of input tokens (0-1). Applies only "
+             "to Anthropic models (prompt caching). Must satisfy cache-fraction + W <= 1.",
     )
     pe.set_defaults(func=cmd_estimate)
 
