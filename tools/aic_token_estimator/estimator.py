@@ -36,11 +36,12 @@ cache). We exploit this to produce analytic low/high bounds without sampling.
 What the token total represents
 -------------------------------
 The estimate is inverted from DOLLARS, so it is a *cost-weighted* (billable)
-token figure. GitHub bills cache-read tokens at ~0.1x the uncached-input rate,
-yet a raw token-throughput report (e.g. the GitHub Copilot metrics export)
-counts those cached tokens at 100%. For cache-heavy agentic usage the throughput
-view can read several times higher than this dollar-inverted view — both are
-valid, they just measure different things. The cache fraction `c` is the lever
+token figure. GitHub bills cache-read tokens at a discounted rate relative to
+uncached input (often ~0.1×, but model-dependent), yet a raw token-throughput
+report (e.g. the GitHub Copilot metrics export) counts those cached tokens at
+100%. For cache-heavy agentic usage the throughput view can read several times
+higher than this dollar-inverted view — both are valid, they just measure
+different things. The cache fraction `c` is the lever
 that moves between them; supply a measured `c` (see calibrate_mix) to make the
 estimate reproduce a throughput figure. IDE code completions are not billed in
 AI credits, so they carry no credits to invert and are out of scope here.
