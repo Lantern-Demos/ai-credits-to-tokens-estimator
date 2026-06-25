@@ -546,6 +546,10 @@ def cmd_estimate(args: argparse.Namespace) -> int:
     if cwrite_override is not None and not 0.0 <= cwrite_override <= 1.0:
         print("error: --cache-write-fraction must be between 0 and 1", file=sys.stderr)
         return 2
+    if (cache_override is not None and cwrite_override is not None
+            and cache_override + cwrite_override > 1.0):
+        print("error: --cache-fraction + --cache-write-fraction must be <= 1", file=sys.stderr)
+        return 2
     calibrating = (cache_override is not None or rho_override is not None
                    or cwrite_override is not None)
 
