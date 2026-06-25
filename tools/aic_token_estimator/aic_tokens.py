@@ -473,10 +473,11 @@ def _build_executive_summary_markdown(
     )
     lines.append(
         "- **Token figures are cost-weighted (billable) estimates, not raw throughput.** They are "
-        "inverted from dollars, where GitHub bills cache-read tokens at ~10% of the uncached-input "
-        "rate. A raw token-throughput report (e.g. the GitHub Copilot metrics export) counts those "
-        "cached tokens at 100%, so it can read several times higher for cache-heavy agentic usage. "
-        "Both views are valid — they measure different things."
+        "inverted from dollars, where GitHub bills cache-read tokens at a discounted rate "
+        "(often ~10% of uncached input, but model-dependent). A raw token-throughput report "
+        "(e.g. the GitHub Copilot metrics export) counts those cached tokens at 100%, so it can "
+        "read several times higher for cache-heavy agentic usage. Both views are valid — they "
+        "measure different things."
     )
     lines.append(
         "- IDE **code completions and next edit suggestions are excluded**: GitHub does not bill them "
